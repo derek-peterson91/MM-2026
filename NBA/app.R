@@ -64,36 +64,34 @@ draw_court <- function() {
 }
 
 # ── UI ─────────────────────────────────────────────────────────────────────────
-ui <- fluidPage(
-  titlePanel(""),
-  
-  sidebarLayout(
-    sidebarPanel(
-      width = 3,
-      selectizeInput(
-        inputId = "player",
-        label   = "Player",
-        choices = NULL,
-        options = list(placeholder = "Start typing a name...", maxOptions = 20)
-      ),
-      selectInput(
-        inputId  = "season",
-        label    = "Season",
-        choices  = c("2024-25", "2023-24", "2022-23", "2021-22", "2020-21"),
-        selected = "2024-25"
-      ),
-      selectInput(
-        inputId = "game",
-        label   = "Game",
-        choices = NULL   # populated reactively after player selected
-      )
+ui <- fluidPage(titlePanel(""), sidebarLayout(
+  sidebarPanel(
+    width = 3,
+    selectizeInput(
+      inputId = "player",
+      label   = "Player",
+      choices = NULL,
+      options = list(placeholder = "Start typing a name...", maxOptions = 20)
     ),
-    
-    mainPanel(
-      width = 9,
-      plotOutput("shot_chart", height = "800px", width = "800px")
-    )
-  )
+    selectInput(
+      inputId  = "season",
+      label    = "Season",
+      choices  = c("2025-26", "2024-25", "2023-24", "2022-23", "2021-22", "2020-21"),
+      selected = "2025-26"
+    ),
+    selectInput(
+      inputId = "game",
+      label   = "Game",
+      choices = NULL   # populated reactively after player selected
+    ),
+    uiOutput("player_headshot"),
+  ),
+  
+  mainPanel(width = 9, fluidRow(
+    column(8, plotOutput(
+      "shot_chart", height = "800px", width = "800px"
+    )), column(4, uiOutput("game_stats"))
+  )))
 )
 
 # ── Server ─────────────────────────────────────────────────────────────────────
@@ -115,6 +113,22 @@ server <- function(input, output, session) {
       choices  = choices,
       selected = NULL,
       server   = TRUE
+    )
+  })
+  
+  output$player_headshot <- renderUI({
+    req(input$player)
+    
+    url <- paste0(
+      "https://cdn.nba.com/headshots/nba/latest/1040x760/",
+      input$player,
+      ".png"
+    )
+    
+    tags$img(
+      src   = url,
+      width = "100%",
+      style = "border-radius: 8px; margin-bottom: 10px;"
     )
   })
   
@@ -210,6 +224,50 @@ server <- function(input, output, session) {
         plot.margin      = margin(t = 15, r = 0, b = 0, l = 0)
       )
   }, bg = "#202938")
+  
+  output$game_stats <- renderUI({
+    req(input$game)
+    
+    log  <- game_log()
+    
+    # print to console so you can see exact values
+    message("All columns: ", paste(names(log), collapse = ", "))
+    
+    game <- log[log$Game_ID == input$game, ]
+    
+    message("Game row: ", paste(unlist(game[1,]), collapse = ", "))
+    
+    stats <- list(
+      "Minutes"   = game$MIN,
+      "Points"    = game$PTS,
+      "FGM / FGA" = paste0(game$FGM, " / ", game$FGA),
+      "FG%"       = paste0(round(as.numeric(game$FG_PCT) * 100, 1), "%"),
+      "3PM / 3PA" = paste0(game$FG3M, " / ", game$FG3A),
+      "3P%"       = paste0(round(as.numeric(game$FG3_PCT) * 100, 1), "%"),
+      "FTM / FTA" = paste0(game$FTM, " / ", game$FTA),
+      "FT%"       = paste0(round(as.numeric(game$FT_PCT) * 100, 1), "%")
+    )
+    
+    tagList(
+      tags$div(
+        style = "color: black; padding: 20px; margin-top: 60px;",
+        tags$h4(
+          style = "color: #ff9339; border-bottom: 1px solid #ff9339; 
+                 padding-bottom: 8px; margin-bottom: 16px;",
+          "Game Stats"
+        ),
+        tagList(lapply(names(stats), function(label) {
+          tags$div(
+            style = "display: flex; justify-content: space-between; 
+                   padding: 8px 0; border-bottom: 1px solid #333;",
+            tags$span(style = "color: gray;", label),
+            tags$span(style = "font-weight: bold;", as.character(stats[[label]]))
+          )
+        }))
+      )
+    )
+  })
+  
 }
 
 shinyApp(ui, server)
