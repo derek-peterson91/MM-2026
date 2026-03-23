@@ -5,20 +5,53 @@ library(hoopR)
 library(scales)
 
 # ── Court constants ────────────────────────────────────────────────────────────
-COURT_W     <- 50
-HALFCOURT_Y <- 47
-BASELINE_Y  <- 0
-BASKET_X    <- 0
-BASKET_Y    <- 5.25
-BACKBOARD_Y <- 4
+COURT_W      <- 50
+HALFCOURT_Y  <- 47
+BASELINE_Y   <- 0
+BASKET_X     <- 0
+BASKET_Y     <- 5.25
+BACKBOARD_Y  <- 4
 BACKBOARD_HW <- 3
-KEY_HW      <- 8
-FT_LINE_Y   <- 18.833
-FT_R        <- 6
-RA_R        <- 4
-THREE_R     <- 23.75
-CORNER_X    <- 22
-CORNER_Y    <- BASKET_Y + sqrt(THREE_R^2 - CORNER_X^2)
+KEY_HW       <- 8
+FT_LINE_Y    <- 18.833
+FT_R         <- 6
+RA_R         <- 4
+THREE_R      <- 23.75
+CORNER_X     <- 22
+CORNER_Y     <- BASKET_Y + sqrt(THREE_R^2 - CORNER_X^2)
+
+# ── Name map (defined globally so all reactives can see it) ───────────────────
+name_map <- c(
+  ATL = "Atlanta Hawks",        BOS = "Boston Celtics",
+  BKN = "Brooklyn Nets",        CHA = "Charlotte Hornets",
+  CHI = "Chicago Bulls",        CLE = "Cleveland Cavaliers",
+  DAL = "Dallas Mavericks",     DEN = "Denver Nuggets",
+  DET = "Detroit Pistons",      GSW = "Golden State Warriors",
+  HOU = "Houston Rockets",      IND = "Indiana Pacers",
+  LAC = "LA Clippers",          LAL = "Los Angeles Lakers",
+  MEM = "Memphis Grizzlies",    MIA = "Miami Heat",
+  MIL = "Milwaukee Bucks",      MIN = "Minnesota Timberwolves",
+  NOP = "New Orleans Pelicans", NYK = "New York Knicks",
+  OKC = "Oklahoma City Thunder",ORL = "Orlando Magic",
+  PHI = "Philadelphia 76ers",   PHX = "Phoenix Suns",
+  POR = "Portland Trail Blazers", SAC = "Sacramento Kings",
+  SAS = "San Antonio Spurs",    TOR = "Toronto Raptors",
+  UTA = "Utah Jazz",            WAS = "Washington Wizards"
+)
+
+# ── Display name map (city only, for titles) ───────────────────────────────────
+display_map <- c(
+  ATL = "Atlanta",       BOS = "Boston",        BKN = "Brooklyn",
+  CHA = "Charlotte",     CHI = "Chicago",        CLE = "Cleveland",
+  DAL = "Dallas",        DEN = "Denver",         DET = "Detroit",
+  GSW = "Golden State",  HOU = "Houston",        IND = "Indiana",
+  LAC = "LA Clippers",   LAL = "LA Lakers",      MEM = "Memphis",
+  MIA = "Miami",         MIL = "Milwaukee",      MIN = "Minnesota",
+  NOP = "New Orleans",   NYK = "New York",        OKC = "Oklahoma City",
+  ORL = "Orlando",       PHI = "Philadelphia",    PHX = "Phoenix",
+  POR = "Portland",      SAC = "Sacramento",      SAS = "San Antonio",
+  TOR = "Toronto",       UTA = "Utah",            WAS = "Washington"
+)
 
 # ── Court helpers ──────────────────────────────────────────────────────────────
 arc <- function(cx, cy, r, angle_from, angle_to, n = 300) {
@@ -26,10 +59,10 @@ arc <- function(cx, cy, r, angle_from, angle_to, n = 300) {
   data.frame(x = cx + r * cos(angles), y = cy + r * sin(angles))
 }
 
-ft_top    <- arc(0, FT_LINE_Y, FT_R, 0, 180)
-ft_bottom <- arc(0, FT_LINE_Y, FT_R, 180, 360)
-ra_arc    <- arc(BASKET_X, BASKET_Y, RA_R, 0, 180)
-ring      <- arc(BASKET_X, BASKET_Y, 0.75, 0, 360)
+ft_top      <- arc(0, FT_LINE_Y, FT_R, 0, 180)
+ft_bottom   <- arc(0, FT_LINE_Y, FT_R, 180, 360)
+ra_arc      <- arc(BASKET_X, BASKET_Y, RA_R, 0, 180)
+ring        <- arc(BASKET_X, BASKET_Y, 0.75, 0, 360)
 three_angle <- acos(CORNER_X / THREE_R) * 180 / pi
 three_arc   <- arc(BASKET_X, BASKET_Y, THREE_R, three_angle, 180 - three_angle)
 
@@ -85,6 +118,11 @@ ui <- fluidPage(
         inputId = "game",
         label   = "Game",
         choices = NULL
+      ),
+      selectInput(
+        inputId = "team",
+        label   = "Team (for Team Shot Chart)",
+        choices = NULL
       )
     ),
     
@@ -92,28 +130,24 @@ ui <- fluidPage(
       width = 9,
       tabsetPanel(
         
-        # ── Tab 1: Game Shot Chart ───────────────────────────────────────
-        tabPanel("Game Shot Chart",
+        tabPanel("Player Shot Chart",
                  fluidRow(
-                   column(8,
-                          plotOutput("shot_chart", height = "800px", width = "800px")
-                   ),
-                   column(4,
-                          uiOutput("game_stats"),
-                          uiOutput("player_headshot")
-                   )
+                   column(8, plotOutput("shot_chart", height = "752px", width = "800px")),
+                   column(4, uiOutput("game_stats"), uiOutput("player_headshot"))
                  )
         ),
         
-        # ── Tab 2: Season Heatmap ────────────────────────────────────────
         tabPanel("Season Heatmap",
                  fluidRow(
-                   column(12,
-                          plotOutput("hex_chart", height = "800px", width = "800px")
-                   )
+                   column(12, plotOutput("hex_chart", height = "752px", width = "800px"))
+                 )
+        ),
+        
+        tabPanel("Team Shot Chart",
+                 fluidRow(
+                   column(12, plotOutput("team_shot_chart", height = "752px", width = "800px"))
                  )
         )
-        
       )
     )
   )
@@ -122,45 +156,50 @@ ui <- fluidPage(
 # ── Server ─────────────────────────────────────────────────────────────────────
 server <- function(input, output, session) {
   
-  # Populate player search on app load
+  selected_player_name <- reactiveVal(NULL)
+  
+  # ── Player list ──────────────────────────────────────────────────────────────
   observe({
     players <- nba_commonallplayers(
       league_id = "00",
-      season = input$season
+      season    = input$season
     )$CommonAllPlayers %>%
-      filter(ROSTERSTATUS == 1) %>%   # 1 = active roster, 0 = inactive
+      filter(ROSTERSTATUS == 1) %>%
       arrange(DISPLAY_FIRST_LAST)
     
     choices <- setNames(players$PERSON_ID, players$DISPLAY_FIRST_LAST)
     
-    updateSelectizeInput(
-      session, "player",
-      choices  = choices,
-      selected = NULL,
-      server   = TRUE
-    )
+    updateSelectizeInput(session, "player",
+                         choices  = choices,
+                         selected = NULL,
+                         server   = TRUE)
   })
   
-  output$player_headshot <- renderUI({
+  # ── Track selected player name ───────────────────────────────────────────────
+  observeEvent(input$player, {
     req(input$player)
     
-    url <- paste0(
-      "https://cdn.nba.com/headshots/nba/latest/1040x760/",
-      input$player,
-      ".png"
-    )
+    name <- nba_commonallplayers(
+      league_id = "00",
+      season    = input$season
+    )$CommonAllPlayers %>%
+      filter(PERSON_ID == input$player) %>%
+      pull(DISPLAY_FIRST_LAST)
     
+    selected_player_name(name)
+  })
+  
+  # ── Headshot ─────────────────────────────────────────────────────────────────
+  output$player_headshot <- renderUI({
+    req(input$player)
     tags$img(
-      src   = url,
+      src   = paste0("https://cdn.nba.com/headshots/nba/latest/1040x760/", input$player, ".png"),
       width = "100%",
-      style = "border-radius: 8px; margin-bottom: 10px;"
+      style = "border-radius: 8px; margin-top: 16px;"
     )
   })
   
-  
-  
-  # Fetch game log when player or season changes
-  # Update GAME_LABEL in game_log reactive to use new date format
+  # ── Game log ─────────────────────────────────────────────────────────────────
   game_log <- reactive({
     req(input$player, input$season)
     
@@ -178,17 +217,14 @@ server <- function(input, output, session) {
   }) %>%
     bindCache(input$player, input$season)
   
-  # Populate game dropdown whenever game log updates
+  # ── Populate game dropdown ───────────────────────────────────────────────────
   observeEvent(game_log(), {
     log     <- game_log()
-    choices <- setNames(log$Game_ID, log$GAME_LABEL)   # Game_ID not GAME_ID
-    
-    updateSelectInput(session, "game",
-                      choices  = choices,
-                      selected = choices[1])
+    choices <- setNames(log$Game_ID, log$GAME_LABEL)
+    updateSelectInput(session, "game", choices = choices, selected = choices[1])
   })
   
-  # Fetch game details
+  # ── Game score ───────────────────────────────────────────────────────────────
   game_score <- reactive({
     req(input$game, input$season)
     
@@ -203,55 +239,30 @@ server <- function(input, output, session) {
   }) %>%
     bindCache(input$game, input$season)
   
-  selected_player_name <- reactiveVal(NULL)
-  
-  observe({
-    players <- nba_commonallplayers(
-      league_id = "00",
-      season    = input$season
-    )$CommonAllPlayers %>%
-      filter(ROSTERSTATUS == 1) %>%
-      arrange(DISPLAY_FIRST_LAST)
+  # ── Populate team dropdown ───────────────────────────────────────────────────
+  observeEvent(input$game, {
+    req(input$game)
     
-    choices <- setNames(players$PERSON_ID, players$DISPLAY_FIRST_LAST)
-    
-    updateSelectizeInput(
-      session, "player",
-      choices  = choices,
-      selected = NULL,
-      server   = TRUE
+    score <- game_score()
+    choices <- setNames(
+      score$TEAM_ABBREVIATION,
+      display_map[score$TEAM_ABBREVIATION]
     )
+    updateSelectInput(session, "team", choices = choices, selected = choices[1])
   })
   
-  # Separately track the name when player selection changes
-  observeEvent(input$player, {
-    req(input$player)
-    
-    players <- nba_commonallplayers(
-      league_id = "00",
-      season    = input$season
-    )$CommonAllPlayers
-    
-    name <- players %>%
-      filter(PERSON_ID == input$player) %>%
-      pull(DISPLAY_FIRST_LAST)
-    
-    selected_player_name(name)
-  })
-  
-  
-  # Fetch shot data for selected game
+  # ── Individual game shot data ────────────────────────────────────────────────
   shot_data <- reactive({
     req(input$game)
     
     game_id <- str_pad(input$game, width = 10, side = "left", pad = "0")
     
     nba_shotchartdetail(
-      player_id        = input$player,
-      game_id          = game_id,
-      season           = input$season,
-      season_type      = "Regular Season",
-      context_measure  = "FGA"
+      player_id       = input$player,
+      game_id         = game_id,
+      season          = input$season,
+      season_type     = "Regular Season",
+      context_measure = "FGA"
     )$Shot_Chart_Detail %>%
       mutate(
         LOC_X  = as.numeric(LOC_X),
@@ -263,117 +274,7 @@ server <- function(input, output, session) {
   }) %>%
     bindCache(input$player, input$game)
   
-  # Render shot chart
-  output$shot_chart <- renderPlot({
-    req(nrow(shot_data()) > 0)
-    
-    shots       <- shot_data()
-    log         <- game_log()
-    score       <- game_score()
-    game_row    <- log[log$Game_ID == input$game, ]
-    game_label  <- game_row$GAME_LABEL
-    player_name <- selected_player_name()   
-    matchup     <- game_row$MATCHUP  # e.g. "MIN @ BOS" or "MIN vs BOS"
-    
-    # LineScore rows are in matchup order — away team first for @ games
-    team1 <- score$TEAM_ABBREVIATION[1]
-    team2 <- score$TEAM_ABBREVIATION[2]
-    pts1  <- score$PTS[1]
-    pts2  <- score$PTS[2]
-    
-    # Map abbreviation to full city name
-    name_map <- c(
-      ATL = "Atlanta",    BOS = "Boston",     BKN = "Brooklyn",   CHA = "Charlotte",
-      CHI = "Chicago",    CLE = "Cleveland",  DAL = "Dallas",     DEN = "Denver",
-      DET = "Detroit",    GSW = "Golden State", HOU = "Houston",  IND = "Indiana",
-      LAC = "LA Clippers", LAL = "LA Lakers", MEM = "Memphis",   MIA = "Miami",
-      MIL = "Milwaukee",  MIN = "Minnesota",  NOP = "New Orleans", NYK = "New York",
-      OKC = "Oklahoma City", ORL = "Orlando", PHI = "Philadelphia", PHX = "Phoenix",
-      POR = "Portland",   SAC = "Sacramento", SAS = "San Antonio", TOR = "Toronto",
-      UTA = "Utah",       WAS = "Washington"
-    )
-    
-    selected_player_name <- reactiveVal(NULL)
-    
-    city1 <- name_map[team1]
-    city2 <- name_map[team2]
-    
-    score_line <- paste0(name_map[team1], " ", pts1, " — ", name_map[team2], " ", pts2)
-    
-    ggplot(shots, aes(x = x_plot, y = y_plot)) +
-      draw_court() +
-      geom_point(
-        data  = shots %>% filter(result == "Missed"),
-        color = "#9ea2a2", size = 7.5, alpha = 0.7
-      ) +
-      geom_point(
-        data  = shots %>% filter(result == "Made"),
-        color = "#78BE1F", size = 7.5, alpha = 0.9
-      ) +
-      coord_fixed(
-        xlim   = c(-COURT_W / 2, COURT_W / 2),
-        ylim   = c(BASELINE_Y, HALFCOURT_Y),
-        expand = FALSE
-      ) +
-      labs(
-        title    = player_name,
-        subtitle = score_line
-      ) +
-      theme_void() +
-      theme(
-        plot.background  = element_rect(fill = "#202938", color = NA),
-        panel.background = element_rect(fill = "#202938", color = NA),
-        plot.title       = element_text(color = "white", size = 24, face = "bold",
-                                        hjust = 0.5, margin = margin(t = 20)),
-        plot.subtitle    = element_text(color = "gray70", size = 18,
-                                        hjust = 0.5, margin = margin(t = 4, b = 10)),
-        plot.margin      = margin(t = 15, r = 0, b = 0, l = 0)
-      )
-  }, bg = "#202938")
-  
-  output$game_stats <- renderUI({
-    req(input$game)
-    
-    log  <- game_log()
-    
-    # print to console so you can see exact values
-    message("All columns: ", paste(names(log), collapse = ", "))
-    
-    game <- log[log$Game_ID == input$game, ]
-    
-    message("Game row: ", paste(unlist(game[1,]), collapse = ", "))
-    
-    stats <- list(
-      "Minutes"   = game$MIN,
-      "Points"    = game$PTS,
-      "FGM / FGA" = paste0(game$FGM, " / ", game$FGA),
-      "FG%"       = paste0(round(as.numeric(game$FG_PCT) * 100, 1), "%"),
-      "3PM / 3PA" = paste0(game$FG3M, " / ", game$FG3A),
-      "3P%"       = paste0(round(as.numeric(game$FG3_PCT) * 100, 1), "%"),
-      "FTM / FTA" = paste0(game$FTM, " / ", game$FTA),
-      "FT%"       = paste0(round(as.numeric(game$FT_PCT) * 100, 1), "%")
-    )
-    
-    tagList(
-      tags$div(
-        style = "color: black; padding: 20px; margin-top: 60px;",
-        tags$h4(
-          style = "color: #ff9339; border-bottom: 1px solid #ff9339; 
-                 padding-bottom: 8px; margin-bottom: 16px;",
-          "Game Stats"
-        ),
-        tagList(lapply(names(stats), function(label) {
-          tags$div(
-            style = "display: flex; justify-content: space-between; 
-                   padding: 8px 0; border-bottom: 1px solid #333;",
-            tags$span(style = "color: gray;", label),
-            tags$span(style = "font-weight: bold;", as.character(stats[[label]]))
-          )
-        }))
-      )
-    )
-  })
-  
+  # ── Season shot data ─────────────────────────────────────────────────────────
   shot_data_season <- reactive({
     req(input$player, input$season)
     
@@ -391,66 +292,206 @@ server <- function(input, output, session) {
         y_plot         = LOC_Y / 10 + BASKET_Y
       ) %>%
       filter(
-        is.finite(x_plot),
-        is.finite(y_plot),
-        is.finite(SHOT_MADE_FLAG),
-        x_plot >= -COURT_W / 2,
-        x_plot <=  COURT_W / 2,
-        y_plot >= BASELINE_Y,
-        y_plot <= HALFCOURT_Y
+        is.finite(x_plot), is.finite(y_plot), is.finite(SHOT_MADE_FLAG),
+        x_plot >= -COURT_W / 2, x_plot <= COURT_W / 2,
+        y_plot >= BASELINE_Y,   y_plot <= HALFCOURT_Y
       )
   }) %>%
     bindCache(input$player, input$season)
   
-  # Render heatmap
-  output$hex_chart <- renderPlot({
-    req(nrow(shot_data_season()) > 0)
+  # ── Team shot data ───────────────────────────────────────────────────────────
+  team_shot_data <- reactive({
+    req(input$game, input$team)
     
-    shots  <- shot_data_season()
-    log    <- game_log()
-    player_name <- log$PLAYER_NAME[1]
+    game_id   <- str_pad(input$game, width = 10, side = "left", pad = "0")
+    full_name <- name_map[input$team]   # e.g. "Minnesota Timberwolves"
+    
+    nba_shotchartdetail(
+      player_id              = "0",
+      game_id                = game_id,
+      season                 = input$season,
+      season_type            = "Regular Season",
+      context_measure_simple = "FGA"
+    )$Shot_Chart_Detail %>%
+      filter(TEAM_NAME == full_name) %>%
+      mutate(
+        LOC_X  = as.numeric(LOC_X),
+        LOC_Y  = as.numeric(LOC_Y),
+        x_plot = LOC_X / 10,
+        y_plot = LOC_Y / 10 + BASKET_Y,
+        result = if_else(SHOT_MADE_FLAG == "1", "Made", "Missed")
+      )
+  }) %>%
+    bindCache(input$game, input$team)
+  
+  # ── Render: game shot chart ──────────────────────────────────────────────────
+  output$shot_chart <- renderPlot({
+    req(nrow(shot_data()) > 0)
+    
+    shots       <- shot_data()
+    log         <- game_log()
+    score       <- game_score()
+    game_row    <- log[log$Game_ID == input$game, ]
+    game_label  <- game_row$GAME_LABEL
+    player_name <- selected_player_name()
+    
+    team1      <- score$TEAM_ABBREVIATION[1]
+    team2      <- score$TEAM_ABBREVIATION[2]
+    score_line <- paste0(display_map[team1], " ", score$PTS[1],
+                         " — ", display_map[team2], " ", score$PTS[2])
     
     ggplot(shots, aes(x = x_plot, y = y_plot)) +
       draw_court() +
-      stat_summary_hex(
-        aes(z = SHOT_MADE_FLAG),
-        fun   = mean,
-        bins  = 30,
-        alpha = 0.95
+      geom_point(data = shots %>% filter(result == "Missed"),
+                 color = "#9ea2a2", size = 7.5, alpha = 0.7) +
+      geom_point(data = shots %>% filter(result == "Made"),
+                 color = "#78BE1F", size = 7.5, alpha = 0.9) +
+      coord_fixed(xlim = c(-COURT_W/2, COURT_W/2),
+                  ylim = c(BASELINE_Y, HALFCOURT_Y), expand = FALSE) +
+      labs(title = player_name, subtitle = paste0(game_label, "\n", score_line)) +
+      theme_void() +
+      theme(
+        plot.background  = element_rect(fill = "#202938", color = NA),
+        panel.background = element_rect(fill = "#202938", color = NA),
+        plot.title    = element_text(color = "white",  size = 24, face = "bold",
+                                     hjust = 0.5, margin = margin(t = 20)),
+        plot.subtitle = element_text(color = "gray70", size = 18,
+                                     hjust = 0.5, margin = margin(t = 4, b = 10),
+                                     lineheight = 1.4),
+        plot.margin   = margin(t = 15, r = 0, b = 0, l = 0)
+      )
+  }, bg = "#202938", width = 800, height = 752)
+  
+  # ── Render: game stats ───────────────────────────────────────────────────────
+  output$game_stats <- renderUI({
+    req(input$game)
+    
+    game <- game_log()[game_log()$Game_ID == input$game, ]
+    
+    stats <- list(
+      "Minutes"   = game$MIN,
+      "Points"    = game$PTS,
+      "FGM / FGA" = paste0(game$FGM, " / ", game$FGA),
+      "FG%"       = paste0(round(as.numeric(game$FG_PCT) * 100, 1), "%"),
+      "3PM / 3PA" = paste0(game$FG3M, " / ", game$FG3A),
+      "3P%"       = paste0(round(as.numeric(game$FG3_PCT) * 100, 1), "%"),
+      "FTM / FTA" = paste0(game$FTM, " / ", game$FTA),
+      "FT%"       = paste0(round(as.numeric(game$FT_PCT) * 100, 1), "%")
+    )
+    
+    tagList(tags$div(
+      style = "padding: 20px; margin-top: 60px;",
+      tags$h4(style = "color: #ff9339; border-bottom: 1px solid #ff9339;
+                        padding-bottom: 8px; margin-bottom: 16px;", "Game Stats"),
+      tagList(lapply(names(stats), function(label) {
+        tags$div(
+          style = "display: flex; justify-content: space-between;
+                   padding: 8px 0; border-bottom: 1px solid #333;",
+          tags$span(style = "color: gray;", label),
+          tags$span(style = "color: white; font-weight: bold;", as.character(stats[[label]]))
+        )
+      }))
+    ))
+  })
+  
+  # ── Render: season heatmap ───────────────────────────────────────────────────
+  output$hex_chart <- renderPlot({
+    req(nrow(shot_data_season()) > 0)
+    
+    shots       <- shot_data_season()
+    player_name <- selected_player_name()
+    
+    ggplot(shots, aes(x = x_plot, y = y_plot)) +
+      draw_court() +
+      stat_summary_hex(aes(z = SHOT_MADE_FLAG), fun = mean, bins = 30, alpha = 0.95) +
+      scale_fill_gradient(low = "#8a6950", high = "#ff9339", na.value = NA,
+                          name = "FG%", labels = scales::label_percent(accuracy = 1)) +
+      coord_fixed(xlim = c(-COURT_W/2 - 2, COURT_W/2 + 2),
+                  ylim = c(BASELINE_Y, HALFCOURT_Y), expand = FALSE) +
+      labs(title = player_name, subtitle = paste0(input$season, " Regular Season")) +
+      theme_void() +
+      theme(
+        plot.background  = element_rect(fill = "#202938", color = NA),
+        panel.background = element_rect(fill = "#202938", color = NA),
+        plot.title    = element_text(color = "white",  size = 30, face = "bold",
+                                     hjust = 0.5, margin = margin(t = 10)),
+        plot.subtitle = element_text(color = "gray70", size = 26,
+                                     hjust = 0.5, margin = margin(t = 4, b = 10)),
+        plot.margin   = margin(0, 0, 0, 0),
+        legend.position = "none"
+      )
+  }, bg = "#202938", width = 800, height = 752)
+  
+  # ── Render: team shot chart ──────────────────────────────────────────────────
+  output$team_shot_chart <- renderPlot({
+    req(nrow(team_shot_data()) > 0)
+    
+    shots      <- team_shot_data()
+    log        <- game_log()
+    score      <- game_score()
+    game_row   <- log[log$Game_ID == input$game, ]
+    game_label <- game_row$GAME_LABEL
+    
+    team1      <- score$TEAM_ABBREVIATION[1]
+    team2      <- score$TEAM_ABBREVIATION[2]
+    score_line <- paste0(display_map[team1],
+                         " ",
+                         score$PTS[1],
+                         " — ",
+                         display_map[team2],
+                         " ",
+                         score$PTS[2])
+    team_name  <- display_map[input$team]
+    
+    ggplot(shots, aes(x = x_plot, y = y_plot)) +
+      draw_court() +
+      geom_point(
+        data = shots %>% filter(result == "Missed"),
+        color = "#9ea2a2",
+        size = 5,
+        alpha = 0.5
       ) +
-      scale_fill_gradient(
-        low      = "#8a6950",
-        high     = "#ff9339",
-        na.value = NA,
-        name     = "FG%",
-        labels   = scales::label_percent(accuracy = 1)
+      geom_point(
+        data = shots %>% filter(result == "Made"),
+        color = "#78BE1F",
+        size = 7.5,
+        alpha = 0.9
       ) +
       coord_fixed(
-        xlim   = c(-COURT_W / 2 - 2, COURT_W / 2 + 2),
-        ylim   = c(BASELINE_Y, HALFCOURT_Y),
+        xlim = c(-COURT_W / 2, COURT_W / 2),
+        ylim = c(BASELINE_Y, HALFCOURT_Y),
         expand = FALSE
       ) +
       labs(
-        title    = player_name,
-        subtitle = paste0(input$season, " Regular Season")
+        title = paste0(team_name, " Team Shot Chart"),
+        subtitle = paste0(game_label, "\n", score_line)
       ) +
       theme_void() +
       theme(
         plot.background  = element_rect(fill = "#202938", color = NA),
         panel.background = element_rect(fill = "#202938", color = NA),
-        plot.title       = element_text(color = "white", size = 30, face = "bold",
-                                        hjust = 0.5, margin = margin(t = 10)),
-        plot.subtitle    = element_text(color = "gray70", size = 26,
-                                        hjust = 0.5, margin = margin(t = 4, b = 10)),
-        plot.margin      = margin(t = 0, r = 0, b = 0, l = 0),
-        legend.position = 'none'
-        #legend.box.margin     = margin(0, 20, 0, 0),
-        # legend.text           = element_text(color = "gray70", size = 16),
-        # legend.title          = element_text(color = "gray70"),
-        # legend.background     = element_rect(fill = "transparent", color = NA),
-        # legend.box.background = element_rect(fill = "transparent", color = NA)
+        plot.title    = element_text(
+          color = "white",
+          size = 28,
+          face = "bold",
+          hjust = 0.5,
+          margin = margin(t = 20, b = 4)
+        ),
+        plot.subtitle = element_text(
+          color = "gray70",
+          size = 18,
+          hjust = 0.5,
+          margin = margin(t = 4, b = 10),
+          lineheight = 1.4
+        ),
+        plot.margin   = margin(
+          t = 15,
+          r = 0,
+          b = 0,
+          l = 0
+        )
       )
-  }, bg = "#202938")
+  }, bg = "#202938", width = 800, height = 752)
   
 }
 
