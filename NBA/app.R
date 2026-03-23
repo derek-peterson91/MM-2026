@@ -381,14 +381,14 @@ server <- function(input, output, session) {
     
     tagList(tags$div(
       style = "padding: 20px; margin-top: 60px;",
-      tags$h4(style = "color: #ff9339; border-bottom: 1px solid #ff9339;
+      tags$h4(style = "color: #000000; border-bottom: 1px solid #ff9339;
                         padding-bottom: 8px; margin-bottom: 16px;", "Game Stats"),
       tagList(lapply(names(stats), function(label) {
         tags$div(
           style = "display: flex; justify-content: space-between;
                    padding: 8px 0; border-bottom: 1px solid #333;",
           tags$span(style = "color: gray;", label),
-          tags$span(style = "color: white; font-weight: bold;", as.character(stats[[label]]))
+          tags$span(style = "color: black; font-weight: bold;", as.character(stats[[label]]))
         )
       }))
     ))
