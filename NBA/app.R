@@ -85,8 +85,7 @@ ui <- fluidPage(
         inputId = "game",
         label   = "Game",
         choices = NULL
-      ),
-      uiOutput("player_headshot")
+      )
     ),
     
     mainPanel(
@@ -100,7 +99,8 @@ ui <- fluidPage(
                           plotOutput("shot_chart", height = "800px", width = "800px")
                    ),
                    column(4,
-                          uiOutput("game_stats")
+                          uiOutput("game_stats"),
+                          uiOutput("player_headshot")
                    )
                  )
         ),
@@ -157,7 +157,10 @@ server <- function(input, output, session) {
     )
   })
   
+  
+  
   # Fetch game log when player or season changes
+  # Update GAME_LABEL in game_log reactive to use new date format
   game_log <- reactive({
     req(input$player, input$season)
     
@@ -168,7 +171,7 @@ server <- function(input, output, session) {
     )[[1]] %>%
       mutate(
         GAME_DATE  = as.Date(GAME_DATE, format = "%b %d, %Y"),
-        GAME_LABEL = paste0(format(GAME_DATE, "%b %d"), " — ",
+        GAME_LABEL = paste0(format(GAME_DATE, "%m/%d/%Y"), " — ",
                             str_replace(MATCHUP, "vs\\.", "vs"))
       ) %>%
       arrange(desc(GAME_DATE))
@@ -184,6 +187,58 @@ server <- function(input, output, session) {
                       choices  = choices,
                       selected = choices[1])
   })
+  
+  # Fetch game details
+  game_score <- reactive({
+    req(input$game, input$season)
+    
+    game_id <- str_pad(input$game, width = 10, side = "left", pad = "0")
+    
+    nba_leaguegamelog(
+      season      = input$season,
+      season_type = "Regular Season"
+    )$LeagueGameLog %>%
+      filter(GAME_ID == game_id) %>%
+      select(TEAM_ABBREVIATION, PTS)
+  }) %>%
+    bindCache(input$game, input$season)
+  
+  selected_player_name <- reactiveVal(NULL)
+  
+  observe({
+    players <- nba_commonallplayers(
+      league_id = "00",
+      season    = input$season
+    )$CommonAllPlayers %>%
+      filter(ROSTERSTATUS == 1) %>%
+      arrange(DISPLAY_FIRST_LAST)
+    
+    choices <- setNames(players$PERSON_ID, players$DISPLAY_FIRST_LAST)
+    
+    updateSelectizeInput(
+      session, "player",
+      choices  = choices,
+      selected = NULL,
+      server   = TRUE
+    )
+  })
+  
+  # Separately track the name when player selection changes
+  observeEvent(input$player, {
+    req(input$player)
+    
+    players <- nba_commonallplayers(
+      league_id = "00",
+      season    = input$season
+    )$CommonAllPlayers
+    
+    name <- players %>%
+      filter(PERSON_ID == input$player) %>%
+      pull(DISPLAY_FIRST_LAST)
+    
+    selected_player_name(name)
+  })
+  
   
   # Fetch shot data for selected game
   shot_data <- reactive({
@@ -212,22 +267,48 @@ server <- function(input, output, session) {
   output$shot_chart <- renderPlot({
     req(nrow(shot_data()) > 0)
     
-    shots      <- shot_data()
-    log        <- game_log()
-    game_label <- log$GAME_LABEL[log$Game_ID == input$game]
+    shots       <- shot_data()
+    log         <- game_log()
+    score       <- game_score()
+    game_row    <- log[log$Game_ID == input$game, ]
+    game_label  <- game_row$GAME_LABEL
+    player_name <- selected_player_name()   
+    matchup     <- game_row$MATCHUP  # e.g. "MIN @ BOS" or "MIN vs BOS"
     
-    # Pull player name from the game log — PLAYER_NAME is already there
-    player_name <- log$PLAYER_NAME[1]
+    # LineScore rows are in matchup order — away team first for @ games
+    team1 <- score$TEAM_ABBREVIATION[1]
+    team2 <- score$TEAM_ABBREVIATION[2]
+    pts1  <- score$PTS[1]
+    pts2  <- score$PTS[2]
+    
+    # Map abbreviation to full city name
+    name_map <- c(
+      ATL = "Atlanta",    BOS = "Boston",     BKN = "Brooklyn",   CHA = "Charlotte",
+      CHI = "Chicago",    CLE = "Cleveland",  DAL = "Dallas",     DEN = "Denver",
+      DET = "Detroit",    GSW = "Golden State", HOU = "Houston",  IND = "Indiana",
+      LAC = "LA Clippers", LAL = "LA Lakers", MEM = "Memphis",   MIA = "Miami",
+      MIL = "Milwaukee",  MIN = "Minnesota",  NOP = "New Orleans", NYK = "New York",
+      OKC = "Oklahoma City", ORL = "Orlando", PHI = "Philadelphia", PHX = "Phoenix",
+      POR = "Portland",   SAC = "Sacramento", SAS = "San Antonio", TOR = "Toronto",
+      UTA = "Utah",       WAS = "Washington"
+    )
+    
+    selected_player_name <- reactiveVal(NULL)
+    
+    city1 <- name_map[team1]
+    city2 <- name_map[team2]
+    
+    score_line <- paste0(name_map[team1], " ", pts1, " — ", name_map[team2], " ", pts2)
     
     ggplot(shots, aes(x = x_plot, y = y_plot)) +
       draw_court() +
       geom_point(
         data  = shots %>% filter(result == "Missed"),
-        color = "#8a6950", size = 6, alpha = 0.7
+        color = "#9ea2a2", size = 6, alpha = 0.7
       ) +
       geom_point(
         data  = shots %>% filter(result == "Made"),
-        color = "#ff9339", size = 6, alpha = 0.9
+        color = "#78BE1F", size = 6, alpha = 0.9
       ) +
       coord_fixed(
         xlim   = c(-COURT_W / 2, COURT_W / 2),
@@ -236,15 +317,15 @@ server <- function(input, output, session) {
       ) +
       labs(
         title    = player_name,
-        subtitle = game_label
+        subtitle = score_line
       ) +
       theme_void() +
       theme(
         plot.background  = element_rect(fill = "#202938", color = NA),
         panel.background = element_rect(fill = "#202938", color = NA),
-        plot.title       = element_text(color = "white", size = 30, face = "bold",
-                                        hjust = 0.5, margin = margin(t = 10)),
-        plot.subtitle    = element_text(color = "gray70", size = 26,
+        plot.title       = element_text(color = "white", size = 24, face = "bold",
+                                        hjust = 0.5, margin = margin(t = 20)),
+        plot.subtitle    = element_text(color = "gray70", size = 18,
                                         hjust = 0.5, margin = margin(t = 4, b = 10)),
         plot.margin      = margin(t = 15, r = 0, b = 0, l = 0)
       )
