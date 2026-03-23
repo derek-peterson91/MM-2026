@@ -139,76 +139,69 @@ shots_plot <- shots_clean %>%
 # ── Plot ──────────────────────────────────────────────────────────────────────
 draw_court <- function() {
   list(
-    geom_rect(
-      aes(xmin = -COURT_W/2, xmax = COURT_W/2,
-          ymin = BASELINE_Y, ymax = HALFCOURT_Y),
-      fill = NA, color = "gray70", linewidth = 0.8,
-      inherit.aes = FALSE
-    ),
-    
     geom_path(
       data = key_rect,
       aes(x, y),
-      color = "gray70",
-      linewidth = 0.8,
+      color = "gray50",
+      linewidth = 1,
       inherit.aes = FALSE
     ),
     
     geom_path(
       data = ft_top, aes(x, y),
-      color = "gray70", linewidth = 0.8,
+      color = "gray50", linewidth = 1,
       inherit.aes = FALSE
     ),
     
     geom_path(
       data = ft_bottom, aes(x, y),
-      color = "gray70", linewidth = 0.8, linetype = "dashed",
+      color = "gray50", linewidth = 1, linetype = "dashed",
       inherit.aes = FALSE
     ),
     
     geom_path(
       data = three_arc, aes(x, y),
-      color = "gray70", linewidth = 0.8,
+      color = "gray50", linewidth = 1,
       inherit.aes = FALSE
     ),
     
     geom_segment(
       aes(x = -CORNER_X, xend = -CORNER_X,
           y = BASELINE_Y, yend = CORNER_Y),
-      color = "gray70", linewidth = 0.8,
+      color = "gray50", linewidth = 1,
       inherit.aes = FALSE
     ),
     
     geom_segment(
       aes(x = CORNER_X, xend = CORNER_X,
           y = BASELINE_Y, yend = CORNER_Y),
-      color = "gray70", linewidth = 0.8,
+      color = "gray50", linewidth = 1,
       inherit.aes = FALSE
     ),
     
     geom_path(
       data = ra_arc, aes(x, y),
-      color = "gray70", linewidth = 0.8,
+      color = "gray50", linewidth = 1,
       inherit.aes = FALSE
     ),
     
     geom_segment(
       aes(x = -BACKBOARD_HW, xend = BACKBOARD_HW,
           y = BACKBOARD_Y, yend = BACKBOARD_Y),
-      color = "gray70", linewidth = 2,
+      color = "gray50", linewidth = 2,
       inherit.aes = FALSE
     ),
     
     geom_segment(
       aes(x = 0, xend = 0,
           y = BACKBOARD_Y, yend = BASKET_Y - 0.75),
-      color = "gray70", linewidth = 1,
+      color = "gray50", linewidth = 1,
       inherit.aes = FALSE
     ),
     
     geom_path(
       data = ring, aes(x, y),
-      color = "gray70", linewidth = 1,
+      color = "gray50", linewidth = 1,
       inherit.aes = FALSE
     )
   )
@@ -278,20 +271,31 @@ ggplot(shots_hex, aes(x = x_plot, y = y_plot)) +
     low = "gray25",
     high = "#ff9339",
     na.value = NA,
-    name = "FG%"
+    name = "FG%",
+    labels = scales::label_percent(accuracy = 1)
   ) +
   
   coord_fixed(
-    xlim = c(-COURT_W/2, COURT_W/2),
+    xlim = c(-COURT_W/2 - 2, COURT_W/2 + 2),
     ylim = c(BASELINE_Y, HALFCOURT_Y),
     expand = FALSE
   ) +
   
   theme_void() +
   theme(
-    plot.background = element_rect(fill = "#000000", color = NA),
-    panel.background = element_rect(fill = "#000000", color = NA),
+    plot.background = element_rect(fill = "gray15", color = NA),
+    panel.background = element_rect(fill = "gray15", color = NA),
     plot.margin = margin(0, 0, 0, 0),
+    legend.box.margin = margin(0, 20, 0, 0),  # top, right, bottom, left
     legend.text = element_text(color = "white"),
-    legend.title = element_text(color = "white")
+    legend.title = element_text(color = "white"),
+    legend.background = element_rect(fill = 'transparent', color = NA),
+    legend.box.background = element_rect(fill = 'transparent', color = NA)
   )
+
+ggsave(
+  'C:/Users/derek.peterson/Downloads/nbahex.jpeg',
+  width = 16,
+  height = 9,
+  dpi = 300
+)
