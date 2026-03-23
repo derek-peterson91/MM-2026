@@ -1,6 +1,7 @@
 
 library(hoopR)
 library(tidyverse)
+library(hexbin)
 
 
 players <- nba_commonallplayers(
@@ -129,6 +130,12 @@ hash_df <- do.call(rbind, lapply(hash_y, function(y) {
   )
 }))
 
+shots_plot <- shots_clean %>%
+  mutate(
+    x_plot = LOC_X / 10,
+    y_plot = LOC_Y / 10 + BASKET_Y
+  )
+
 # ── Plot ──────────────────────────────────────────────────────────────────────
 draw_court <- function() {
   list(
@@ -210,11 +217,11 @@ draw_court <- function() {
 
 
 
-ggplot(shots_plot, aes(x = x_plot, y = y_plot)) +
+ggplot(shots_clean, aes(x = x_plot, y = y_plot)) +
   draw_court() +
   geom_point(
     data = shots_plot %>% filter(result == "Missed"),
-    color = "#634b38",
+    color = "#8a6950",
     size = 2,
     alpha = 0.4
   ) +
@@ -234,4 +241,57 @@ ggplot(shots_plot, aes(x = x_plot, y = y_plot)) +
     plot.background = element_rect(fill = "#202938", color = NA),
     panel.background = element_rect(fill = "#202938", color = NA),
     plot.margin = margin(0, 0, 0, 0)
+  )
+
+############ HEXBIN STYLE ############ 
+
+shots_hex <- shots_clean %>%
+  mutate(
+    LOC_X = as.numeric(LOC_X),
+    LOC_Y = as.numeric(LOC_Y),
+    SHOT_MADE_FLAG = as.numeric(SHOT_MADE_FLAG),
+    x_plot = LOC_X / 10,
+    y_plot = LOC_Y / 10 + BASKET_Y
+  ) %>%
+  filter(
+    is.finite(x_plot),
+    is.finite(y_plot),
+    is.finite(SHOT_MADE_FLAG),
+    x_plot >= -COURT_W/2,
+    x_plot <=  COURT_W/2,
+    y_plot >= BASELINE_Y,
+    y_plot <= HALFCOURT_Y
+  )
+
+ggplot(shots_hex, aes(x = x_plot, y = y_plot)) +
+  
+  draw_court() +
+  
+  stat_summary_hex(
+    aes(z = SHOT_MADE_FLAG),
+    fun = mean,
+    bins = 30,
+    alpha = 0.95
+  ) +
+  
+  scale_fill_gradient(
+    low = "gray25",
+    high = "#ff9339",
+    na.value = NA,
+    name = "FG%"
+  ) +
+  
+  coord_fixed(
+    xlim = c(-COURT_W/2, COURT_W/2),
+    ylim = c(BASELINE_Y, HALFCOURT_Y),
+    expand = FALSE
+  ) +
+  
+  theme_void() +
+  theme(
+    plot.background = element_rect(fill = "#000000", color = NA),
+    panel.background = element_rect(fill = "#000000", color = NA),
+    plot.margin = margin(0, 0, 0, 0),
+    legend.text = element_text(color = "white"),
+    legend.title = element_text(color = "white")
   )
