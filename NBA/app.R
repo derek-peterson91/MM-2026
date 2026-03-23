@@ -64,34 +64,59 @@ draw_court <- function() {
 }
 
 # ── UI ─────────────────────────────────────────────────────────────────────────
-ui <- fluidPage(titlePanel(""), sidebarLayout(
-  sidebarPanel(
-    width = 3,
-    selectizeInput(
-      inputId = "player",
-      label   = "Player",
-      choices = NULL,
-      options = list(placeholder = "Start typing a name...", maxOptions = 20)
+ui <- fluidPage(
+  titlePanel(""),
+  sidebarLayout(
+    sidebarPanel(
+      width = 3,
+      selectizeInput(
+        inputId = "player",
+        label   = "Player",
+        choices = NULL,
+        options = list(placeholder = "Start typing a name...", maxOptions = 20)
+      ),
+      selectInput(
+        inputId  = "season",
+        label    = "Season",
+        choices  = c("2025-26", "2024-25", "2023-24", "2022-23", "2021-22", "2020-21"),
+        selected = "2025-26"
+      ),
+      selectInput(
+        inputId = "game",
+        label   = "Game",
+        choices = NULL
+      ),
+      uiOutput("player_headshot")
     ),
-    selectInput(
-      inputId  = "season",
-      label    = "Season",
-      choices  = c("2025-26", "2024-25", "2023-24", "2022-23", "2021-22", "2020-21"),
-      selected = "2025-26"
-    ),
-    selectInput(
-      inputId = "game",
-      label   = "Game",
-      choices = NULL   # populated reactively after player selected
-    ),
-    uiOutput("player_headshot"),
-  ),
-  
-  mainPanel(width = 9, fluidRow(
-    column(8, plotOutput(
-      "shot_chart", height = "800px", width = "800px"
-    )), column(4, uiOutput("game_stats"))
-  )))
+    
+    mainPanel(
+      width = 9,
+      tabsetPanel(
+        
+        # ── Tab 1: Game Shot Chart ───────────────────────────────────────
+        tabPanel("Game Shot Chart",
+                 fluidRow(
+                   column(8,
+                          plotOutput("shot_chart", height = "800px", width = "800px")
+                   ),
+                   column(4,
+                          uiOutput("game_stats")
+                   )
+                 )
+        ),
+        
+        # ── Tab 2: Season Heatmap ────────────────────────────────────────
+        tabPanel("Season Heatmap",
+                 fluidRow(
+                   column(12,
+                          plotOutput("hex_chart", height = "800px", width = "800px")
+                   )
+                 )
+        )
+        
+      )
+    )
+  )
 )
 
 # ── Server ─────────────────────────────────────────────────────────────────────
@@ -267,6 +292,84 @@ server <- function(input, output, session) {
       )
     )
   })
+  
+  shot_data_season <- reactive({
+    req(input$player, input$season)
+    
+    nba_shotchartdetail(
+      player_id              = input$player,
+      season                 = input$season,
+      season_type            = "Regular Season",
+      context_measure_simple = "FGA"
+    )$Shot_Chart_Detail %>%
+      mutate(
+        LOC_X          = as.numeric(LOC_X),
+        LOC_Y          = as.numeric(LOC_Y),
+        SHOT_MADE_FLAG = as.numeric(SHOT_MADE_FLAG),
+        x_plot         = LOC_X / 10,
+        y_plot         = LOC_Y / 10 + BASKET_Y
+      ) %>%
+      filter(
+        is.finite(x_plot),
+        is.finite(y_plot),
+        is.finite(SHOT_MADE_FLAG),
+        x_plot >= -COURT_W / 2,
+        x_plot <=  COURT_W / 2,
+        y_plot >= BASELINE_Y,
+        y_plot <= HALFCOURT_Y
+      )
+  }) %>%
+    bindCache(input$player, input$season)
+  
+  # Render heatmap
+  output$hex_chart <- renderPlot({
+    req(nrow(shot_data_season()) > 0)
+    
+    shots  <- shot_data_season()
+    log    <- game_log()
+    player_name <- log$PLAYER_NAME[1]
+    
+    ggplot(shots, aes(x = x_plot, y = y_plot)) +
+      draw_court() +
+      stat_summary_hex(
+        aes(z = SHOT_MADE_FLAG),
+        fun   = mean,
+        bins  = 30,
+        alpha = 0.95
+      ) +
+      scale_fill_gradient(
+        low      = "#8a6950",
+        high     = "#ff9339",
+        na.value = NA,
+        name     = "FG%",
+        labels   = scales::label_percent(accuracy = 1)
+      ) +
+      coord_fixed(
+        xlim   = c(-COURT_W / 2 - 2, COURT_W / 2 + 2),
+        ylim   = c(BASELINE_Y, HALFCOURT_Y),
+        expand = FALSE
+      ) +
+      labs(
+        title    = player_name,
+        subtitle = paste0(input$season, " Regular Season")
+      ) +
+      theme_void() +
+      theme(
+        plot.background  = element_rect(fill = "#202938", color = NA),
+        panel.background = element_rect(fill = "#202938", color = NA),
+        plot.title       = element_text(color = "white", size = 30, face = "bold",
+                                        hjust = 0.5, margin = margin(t = 10)),
+        plot.subtitle    = element_text(color = "gray70", size = 26,
+                                        hjust = 0.5, margin = margin(t = 4, b = 10)),
+        plot.margin      = margin(t = 0, r = 0, b = 0, l = 0),
+        legend.position = 'none'
+        #legend.box.margin     = margin(0, 20, 0, 0),
+        # legend.text           = element_text(color = "gray70", size = 16),
+        # legend.title          = element_text(color = "gray70"),
+        # legend.background     = element_rect(fill = "transparent", color = NA),
+        # legend.box.background = element_rect(fill = "transparent", color = NA)
+      )
+  }, bg = "#202938")
   
 }
 
