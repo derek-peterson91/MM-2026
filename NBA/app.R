@@ -304,11 +304,11 @@ server <- function(input, output, session) {
       draw_court() +
       geom_point(
         data  = shots %>% filter(result == "Missed"),
-        color = "#9ea2a2", size = 6, alpha = 0.7
+        color = "#9ea2a2", size = 7.5, alpha = 0.7
       ) +
       geom_point(
         data  = shots %>% filter(result == "Made"),
-        color = "#78BE1F", size = 6, alpha = 0.9
+        color = "#78BE1F", size = 7.5, alpha = 0.9
       ) +
       coord_fixed(
         xlim   = c(-COURT_W / 2, COURT_W / 2),
