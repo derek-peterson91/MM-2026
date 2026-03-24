@@ -3,6 +3,8 @@ library(shiny)
 library(tidyverse)
 library(hoopR)
 library(scales)
+library(cowplot)
+library(magick)
 
 # ── Court constants ────────────────────────────────────────────────────────────
 COURT_W      <- 50
@@ -132,7 +134,11 @@ ui <- fluidPage(
         
         tabPanel("Player Shot Chart",
                  fluidRow(
-                   column(8, plotOutput("shot_chart", height = "752px", width = "800px")),
+                   column(8, plotOutput("shot_chart", height = "752px", width = "800px"),
+                          downloadButton("save_shot_chart", "Save Image",
+                                         style = "margin-top: 10px; background-color: #ff9339; 
+                              border: none; color: black; font-weight: bold;")
+                   ),
                    column(4, uiOutput("game_stats"), uiOutput("player_headshot"))
                  )
         ),
@@ -324,43 +330,189 @@ server <- function(input, output, session) {
   }) %>%
     bindCache(input$game, input$team)
   
+  # ── Plot builder functions ───────────────────────────────────────────────────
+
+build_shot_chart <- function(shots, player_name, game_label, score_line) {
+  ggplot(shots, aes(x = x_plot, y = y_plot)) +
+    draw_court() +
+    geom_point(data = shots %>% filter(result == "Missed"),
+               color = "#9ea2a2", size = 7.5, alpha = 0.7) +
+    geom_point(data = shots %>% filter(result == "Made"),
+               color = "#78BE1F", size = 7.5, alpha = 0.9) +
+    coord_fixed(xlim = c(-COURT_W/2, COURT_W/2),
+                ylim = c(BASELINE_Y, HALFCOURT_Y), expand = FALSE) +
+    labs(title = player_name, subtitle = paste0(game_label, "\n", score_line)) +
+    theme_void() +
+    theme(
+      plot.background  = element_rect(fill = "#202938", color = NA),
+      panel.background = element_rect(fill = "#202938", color = NA),
+      plot.title    = element_text(color = "white",  size = 24, face = "bold",
+                                   hjust = 0.5, margin = margin(t = 20)),
+      plot.subtitle = element_text(color = "gray70", size = 18,
+                                   hjust = 0.5, margin = margin(t = 4, b = 10),
+                                   lineheight = 1.4),
+      plot.margin   = margin(t = 15, r = 0, b = 0, l = 0)
+    )
+}
+
+build_hex_chart <- function(shots, player_name, season) {
+  ggplot(shots, aes(x = x_plot, y = y_plot)) +
+    draw_court() +
+    stat_summary_hex(aes(z = SHOT_MADE_FLAG), fun = mean, bins = 30, alpha = 0.95) +
+    scale_fill_gradient(low = "#8a6950", high = "#ff9339", na.value = NA,
+                        name = "FG%", labels = scales::label_percent(accuracy = 1)) +
+    coord_fixed(xlim = c(-COURT_W/2 - 2, COURT_W/2 + 2),
+                ylim = c(BASELINE_Y, HALFCOURT_Y), expand = FALSE) +
+    labs(title = player_name, subtitle = paste0(season, " Regular Season")) +
+    theme_void() +
+    theme(
+      plot.background  = element_rect(fill = "#202938", color = NA),
+      panel.background = element_rect(fill = "#202938", color = NA),
+      plot.title    = element_text(color = "white",  size = 30, face = "bold",
+                                   hjust = 0.5, margin = margin(t = 10)),
+      plot.subtitle = element_text(color = "gray70", size = 26,
+                                   hjust = 0.5, margin = margin(t = 4, b = 10)),
+      plot.margin   = margin(0, 0, 0, 0),
+      legend.position = "none"
+    )
+}
+
+build_team_shot_chart <- function(shots, team_name, game_label, score_line) {
+  ggplot(shots, aes(x = x_plot, y = y_plot)) +
+    draw_court() +
+    geom_point(data = shots %>% filter(result == "Missed"),
+               color = "#8a6950", size = 3, alpha = 0.5) +
+    geom_point(data = shots %>% filter(result == "Made"),
+               color = "#ff9339", size = 3.5, alpha = 0.9) +
+    coord_fixed(xlim = c(-COURT_W/2, COURT_W/2),
+                ylim = c(BASELINE_Y, HALFCOURT_Y), expand = FALSE) +
+    labs(title = team_name, subtitle = paste0(game_label, "\n", score_line)) +
+    theme_void() +
+    theme(
+      plot.background  = element_rect(fill = "#202938", color = NA),
+      panel.background = element_rect(fill = "#202938", color = NA),
+      plot.title    = element_text(color = "white",  size = 28, face = "bold",
+                                   hjust = 0.5, margin = margin(t = 20, b = 4)),
+      plot.subtitle = element_text(color = "gray70", size = 18,
+                                   hjust = 0.5, margin = margin(t = 4, b = 10),
+                                   lineheight = 1.4),
+      plot.margin   = margin(t = 15, r = 0, b = 0, l = 0)
+    )
+}
+  
+  
+  
   # ── Render: game shot chart ──────────────────────────────────────────────────
-  output$shot_chart <- renderPlot({
-    req(nrow(shot_data()) > 0)
-    
-    shots       <- shot_data()
-    log         <- game_log()
-    score       <- game_score()
-    game_row    <- log[log$Game_ID == input$game, ]
-    game_label  <- game_row$GAME_LABEL
-    player_name <- selected_player_name()
-    
+output$shot_chart <- renderPlot({
+  req(nrow(shot_data()) > 0)
+  
+  score      <- game_score()
+  game_row   <- game_log()[game_log()$Game_ID == input$game, ]
+  team1      <- score$TEAM_ABBREVIATION[1]
+  team2      <- score$TEAM_ABBREVIATION[2]
+  score_line <- paste0(display_map[team1], " ", score$PTS[1],
+                       " — ", display_map[team2], " ", score$PTS[2])
+  
+  build_shot_chart(shot_data(), selected_player_name(),
+                   game_row$GAME_LABEL, score_line)
+}, bg = "#202938", width = 800, height = 752)
+
+output$save_shot_chart <- downloadHandler(
+  filename = function() {
+    paste0(selected_player_name(), "_", input$game, "_shot_chart.png")
+  },
+  content = function(file) {
+    score      <- game_score()
+    log        <- game_log()
+    game_row   <- log[log$Game_ID == input$game, ]
     team1      <- score$TEAM_ABBREVIATION[1]
     team2      <- score$TEAM_ABBREVIATION[2]
     score_line <- paste0(display_map[team1], " ", score$PTS[1],
                          " — ", display_map[team2], " ", score$PTS[2])
+    game       <- game_row
     
-    ggplot(shots, aes(x = x_plot, y = y_plot)) +
-      draw_court() +
-      geom_point(data = shots %>% filter(result == "Missed"),
-                 color = "#9ea2a2", size = 7.5, alpha = 0.7) +
-      geom_point(data = shots %>% filter(result == "Made"),
-                 color = "#78BE1F", size = 7.5, alpha = 0.9) +
-      coord_fixed(xlim = c(-COURT_W/2, COURT_W/2),
-                  ylim = c(BASELINE_Y, HALFCOURT_Y), expand = FALSE) +
-      labs(title = player_name, subtitle = paste0(game_label, "\n", score_line)) +
+    # ── Shot chart plot ──────────────────────────────────────────────────
+    p_court <- build_shot_chart(shot_data(), selected_player_name(),
+                                game_row$GAME_LABEL, score_line)
+    
+    # ── Stats table as ggplot ────────────────────────────────────────────
+    stats_df <- data.frame(
+      label = c("Minutes", "Points", "FGM / FGA", "FG%",
+                "3PM / 3PA", "3P%", "FTM / FTA", "FT%"),
+      value = c(
+        as.character(game$MIN),
+        as.character(game$PTS),
+        paste0(game$FGM, " / ", game$FGA),
+        paste0(round(as.numeric(game$FG_PCT) * 100, 1), "%"),
+        paste0(game$FG3M, " / ", game$FG3A),
+        paste0(round(as.numeric(game$FG3_PCT) * 100, 1), "%"),
+        paste0(game$FTM, " / ", game$FTA),
+        paste0(round(as.numeric(game$FT_PCT) * 100, 1), "%")
+      )
+    )
+    
+    p_stats <- ggplot(stats_df) +
+      geom_rect(aes(xmin = 0, xmax = 1, ymin = seq(0, 7) / 8, ymax = seq(1, 8) / 8),
+                fill = "#202938", color = "gray70") +
+      geom_text(aes(x = 0.05, y = (seq(0.5, 7.5)) / 8, label = label),
+                color = "gray60", hjust = 0, size = 5) +
+      geom_text(aes(x = 0.95, y = (seq(0.5, 7.5)) / 8, label = value),
+                color = "white", hjust = 1, size = 5, fontface = "bold") +
+      annotate("text", x = 0.5, y = 1.06, label = "Game Stats",
+               color = "#ff9339", size = 6, fontface = "bold", hjust = 0.5) +
+      annotate("segment", x = 0, xend = 1, y = 1.02, yend = 1.02,
+               color = "#ff9339", linewidth = 0.8) +
+      scale_x_continuous(limits = c(0, 1), expand = c(0, 0)) +
+      scale_y_continuous(limits = c(0, 1.1), expand = c(0, 0)) +
       theme_void() +
       theme(
         plot.background  = element_rect(fill = "#202938", color = NA),
         panel.background = element_rect(fill = "#202938", color = NA),
-        plot.title    = element_text(color = "white",  size = 24, face = "bold",
-                                     hjust = 0.5, margin = margin(t = 20)),
-        plot.subtitle = element_text(color = "gray70", size = 18,
-                                     hjust = 0.5, margin = margin(t = 4, b = 10),
-                                     lineheight = 1.4),
-        plot.margin   = margin(t = 15, r = 0, b = 0, l = 0)
+        plot.margin      = margin(20, 10, 10, 10)
       )
-  }, bg = "#202938", width = 800, height = 752)
+    
+    # ── Headshot via magick ──────────────────────────────────────────────
+    headshot_url <- paste0(
+      "https://cdn.nba.com/headshots/nba/latest/1040x760/",
+      input$player, ".png"
+    )
+    
+    headshot_img  <- tryCatch(
+      image_read(headshot_url),
+      error = function(e) NULL
+    )
+    
+    if (!is.null(headshot_img)) {
+      p_headshot <- ggdraw() +
+        draw_image(headshot_img) +
+        theme(plot.background = element_rect(fill = "#202938", color = NA),
+              plot.margin     = margin(t = 36, r = 0, b = 0, l = 0))  # adjust t to taste
+    } else {
+      p_headshot <- ggplot() +
+        theme_void() +
+        theme(plot.background = element_rect(fill = "#202938", color = NA))
+    }
+    
+    # ── Right panel: stats on top, headshot on bottom ────────────────────
+    p_right <- plot_grid(
+      p_stats,
+      p_headshot,
+      ncol    = 1,
+      rel_heights = c(1.2, 1)
+    )
+    
+    # ── Combine court + right panel ──────────────────────────────────────
+    p_final <- plot_grid(
+      p_court,
+      p_right,
+      ncol      = 2,
+      rel_widths = c(2.2, 1)
+    )
+    
+    ggsave(file, plot = p_final, width = 9, height = 9,
+           dpi = 300, bg = "#202938")
+  }
+)
   
   # ── Render: game stats ───────────────────────────────────────────────────────
   output$game_stats <- renderUI({
